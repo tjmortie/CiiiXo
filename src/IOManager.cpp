@@ -1,7 +1,8 @@
-#include <CiiiXo.h>
-#include <Arduino.h>
-#include <Wire.h>
 #include "IOManager.h"
+
+#include <Arduino.h>
+//#include <CiiiXo.h>
+#include <Wire.h>
 using namespace std;
 
 uint8_t nr_inputs, nr_outputs = 0;
@@ -24,18 +25,18 @@ void configureIO() {
     bool active;
 
     // Inputs
-    for(uint8_t address = 0x20; address < 0x21 && nr_inputs < MAX_INPUT_MODULES; address++) {
+    for (uint8_t address = 0x20; address < 0x22 && nr_inputs < MAX_INPUT_MODULES; address++) {
         active = detectDevice(address);
         if (active) {
-            input_modules[nr_inputs] = new CiiiXo(address, PIN_INT_PCA9698, handleInterrupt); 
+            input_modules[nr_inputs] = new CiiiXo(address, PIN_INT_PCA9698, handleInterrupt);
             nr_inputs++;
         }
     }
     // Outputs - note, ordened based on address
-    for(uint8_t address = 0x22; address < 0x30 && nr_outputs < MAX_OUTPUT_MODULES; address++) {
+    for (uint8_t address = 0x22; address < 0x30 && nr_outputs < MAX_OUTPUT_MODULES; address++) {
         active = detectDevice(address);
         if (active) {
-            output_modules[nr_outputs] = new CiiiXo(address, PIN_INT_PCA9698, handleInterrupt); 
+            output_modules[nr_outputs] = new CiiiXo(address, PIN_INT_PCA9698, handleInterrupt);
             nr_outputs++;
         }
     }
@@ -58,7 +59,12 @@ void setPin(uint8_t pin, uint8_t value) {
     uint8_t module = pin / MODULE_SIZE;
     uint8_t module_pin = pin % MODULE_SIZE;
 
-    // TODO - verify if module exists before setting pin
+    if (module >= nr_outputs) {
+        Serial.print("trying to set pin on non-existing module: ");
+        Serial.println(module);
+        return;
+    }
+
     output_modules[module]->digitalWrite(module_pin, value);
 }
 
@@ -75,23 +81,25 @@ uint8_t readPin(uint8_t pin, IOType io_type) {
     uint8_t module = pin / MODULE_SIZE;
     uint8_t module_pin = pin % MODULE_SIZE;
 
-    if (module >= MAX_INPUT_MODULES) {
-        Serial.print("trying to read pin on a non-existing module: ");
-        Serial.println(module);
-        return 0 ;
-    }
-
     // Predefine value
     uint8_t value;
 
     if (io_type == INPUT_MODULE) {
-        // TODO - verify if module exists before reading pin
+        if (module >= nr_inputs) {
+            Serial.print("trying to read pin on a non-existing input module: ");
+            Serial.println(module);
+            return 0;
+        }
         value = input_modules[module]->digitalRead(module_pin);
         return value;
     } else {
-        // TODO - verify if module exists before reading pin
+        if (module >= nr_outputs) {
+            Serial.print("trying to read pin on a non-existing output module: ");
+            Serial.println(module);
+            return 0;
+        }
         value = output_modules[module]->digitalRead(module_pin);
-        return value; 
+        return value;
     }
 }
 
@@ -100,15 +108,13 @@ void readAll(uint8_t data[MODULE_SIZE * MAX_INPUT_MODULES]) {
 }
 
 void readAll(uint8_t data[MODULE_SIZE * MAX_INPUT_MODULES], IOType io_type) {
-    
-    uint8_t temp[MODULE_SIZE*MAX_INPUT_MODULES];
+    uint8_t temp[MODULE_SIZE * MAX_INPUT_MODULES];
     for (int mod = 0; mod < MAX_INPUT_MODULES; mod++) {
         input_modules[mod]->digitalReadAll(temp);
         for (int i = 0; i < MODULE_SIZE; i++) {
-            data[mod*MODULE_SIZE + i] = temp[i];
+            data[mod * MODULE_SIZE + i] = temp[i];
         }
     }
-
 }
 
 bool ioChangeDetected() {
@@ -118,16 +124,17 @@ bool ioChangeDetected() {
 }
 
 /* Fills data with -1, 0 or 1 ; indicating the change compared to the previous state*/
-void ioChanges(uint8_t data[MAX_INPUT_MODULES * MODULE_SIZE]) {
-    readAll(data, INPUT_MODULE);
+void ioChanges(int8_t data[MAX_INPUT_MODULES * MODULE_SIZE]) {
+    uint8_t temp[MODULE_SIZE * MAX_INPUT_MODULES];
+    readAll(temp, INPUT_MODULE);
     for (uint8_t i = 0; i < MAX_INPUT_MODULES * MODULE_SIZE; i++) {
-        data[i] = data[i] - pin_history[i];
-        pin_history[i] = pin_history[i] + data[i]; // Update history
+        data[i] = temp[i] - pin_history[i];
+        pin_history[i] = pin_history[i] + data[i];  // Update history
     }
 }
 
 bool detectDevice(uint8_t address) {
-    byte error;  
+    byte error;
 
     // The i2c_scanner uses the return value of
     // the Write.endTransmisstion to see if
@@ -135,22 +142,19 @@ bool detectDevice(uint8_t address) {
     Wire.beginTransmission(address);
     error = Wire.endTransmission();
 
-    if (error == 0)
-    {
-    Serial.print("I2C device found at address 0x");
-    if (address<16)
-        Serial.print("0");
-        Serial.print(address,HEX);
+    if (error == 0) {
+        Serial.print("I2C device found at address 0x");
+        if (address < 16)
+            Serial.print("0");
+        Serial.print(address, HEX);
         Serial.println("  !");
         return true;
-    }
-    else if (error==4)
-    {
+    } else if (error == 4) {
         Serial.print("Unknown error at address 0x");
-        if (address<16)
+        if (address < 16)
             Serial.print("0");
-        Serial.println(address,HEX);
-    }    
+        Serial.println(address, HEX);
+    }
     return false;
 }
 
